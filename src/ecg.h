@@ -11,7 +11,8 @@ void ecg_init();
 void ecg_start();
 
 /***
-* Ticks the threads
+* Ticks the threads.
+* Returns false if the tick threads are busy
 */
 bool ecg_tick();
 
