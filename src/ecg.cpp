@@ -20,14 +20,14 @@ void gc_thread_func();
 
 
 std::vector<std::thread> tick_threads;
-uint32_t thread_count = 0;
+static uint32_t thread_count = 0;
 std::thread gc_thread;
 
 std::atomic_bool running;
 std::mutex tick_mutex;
 std::mutex completed_mutex;
 std::condition_variable cv;
-static std::atomic<uint32_t> completed_threads(UINT32_MAX);
+static std::atomic<uint32_t> completed_threads_flag(UINT32_MAX);
 
 extern std::vector<component_t> registered_components;
 
@@ -36,12 +36,14 @@ extern std::vector<component_t> registered_components;
 
 void create_threads()
 {
+  // Lookup the amount of threads we can use, minimum of MIN_TICK_THREAD_COUNT
   thread_count = std::thread::hardware_concurrency();
   if (thread_count < MIN_TICK_THREAD_COUNT)
   {
     thread_count = MIN_TICK_THREAD_COUNT;
   }
 
+  // Create the tick threads
   for(unsigned i = 0; i < thread_count; ++i)
   {
     tick_threads.push_back(std::thread(tick_thread_func, i+1));
@@ -53,8 +55,13 @@ void create_threads()
 
 void ecg_init()
 {
+  // Create the tick threads
   create_threads();
-  completed_threads = UINT32_MAX;
+
+  // Set the flag to the finished state
+  completed_threads_flag = UINT32_MAX;
+
+  // Create the garbage collection thread
   gc_thread = std::thread(gc_thread_func);
 }
 
@@ -74,7 +81,7 @@ bool ecg_tick()
   if (!ecg_ticking())
   {
     completed_mutex.lock();
-    completed_threads.store(0, std::memory_order_seq_cst);
+    completed_threads_flag.store(0, std::memory_order_seq_cst);
     completed_mutex.unlock();
     cv.notify_all();
     return true;
@@ -89,7 +96,7 @@ bool ecg_tick()
 bool ecg_ticking()
 {
   completed_mutex.lock();
-  auto value = completed_threads.load(std::memory_order_seq_cst);
+  auto value = completed_threads_flag.load(std::memory_order_seq_cst);
   bool ticking = value != UINT32_MAX;
   completed_mutex.unlock();
   return ticking;
@@ -118,22 +125,39 @@ void ecg_cleanup()
 
 
 
+
+uint32_t ecg_thread_count()
+{
+  return thread_count;
+}
+
+
+
+
 #include <iostream>
 void tick_thread_func(uint32_t id)
 {
+  // Hold until the engine is ready to run
   while(!running);
+
+  // While the engine is running
   while(running)
   {
     std::unique_lock<std::mutex> lck (tick_mutex);
+
+    // Wait until it is time to tick
     cv.wait(lck, []{
       completed_mutex.lock();
-      bool ready = completed_threads.load(std::memory_order_seq_cst) < thread_count;
+      // Need to figure out a better way to handle waiting to tick
+      bool ready = completed_threads_flag.load(std::memory_order_seq_cst) < thread_count;
       completed_mutex.unlock();
       return ready;
     });
 
+    // If the engine hasn't been stopped
     if (running)
     {
+      // Iterate through all components and tick them
       for (auto& component : registered_components)
       {
         if (component.tick_func != NULL)
@@ -142,11 +166,13 @@ void tick_thread_func(uint32_t id)
         }
       }
     }
+
+    // Update the flag to show this thread has completed
     completed_mutex.lock();
-    auto current = completed_threads.load(std::memory_order_seq_cst);
-    // std::cerr << "Thread #" << id << " with completed: " << current << std::endl;
-    completed_threads.fetch_add(1, std::memory_order_seq_cst);
+    completed_threads_flag.fetch_add(1, std::memory_order_seq_cst);
     completed_mutex.unlock();
+
+    // Notify any waiting threads that a thread has finished
     cv.notify_all();
   }
 }
@@ -158,14 +184,16 @@ void gc_thread_func()
 {
   while(running)
   {
+    // Wait until all tick threads have completed before doing garbase collection
     std::unique_lock<std::mutex> lck (tick_mutex);
     cv.wait(lck, []{
       completed_mutex.lock();
-      bool ready = completed_threads.load(std::memory_order_seq_cst) == thread_count;
+      bool ready = completed_threads_flag.load(std::memory_order_seq_cst) == thread_count;
       completed_mutex.unlock();
       return ready;
     });
 
+    // Don't gc if we are stopping the engine
     if (running)
     {
       for (auto& component : registered_components)
@@ -173,9 +201,14 @@ void gc_thread_func()
         component.gc_func();
       }
     }
+
+    // Update the flag to COMPLETED
     completed_mutex.lock();
-    completed_threads.store(UINT32_MAX, std::memory_order_seq_cst);
+    completed_threads_flag.store(UINT32_MAX, std::memory_order_seq_cst);
     completed_mutex.unlock();
+
+    // Notify waiting threads
+    // Is this even necessary? What threads are waiting?
     cv.notify_all();
   }
 }
