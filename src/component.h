@@ -8,6 +8,7 @@
 #include <stdint.h>
 #endif
 
+typedef void(*component_init_t)();
 typedef void(*component_tick_t)(uint32_t);
 typedef void(*component_gc_t)();
 typedef void(*component_cleanup_t)();
@@ -15,10 +16,16 @@ typedef void(*component_cleanup_t)();
 
 typedef struct
 {
+  component_init_t init_func;
   component_tick_t tick_func;
   component_gc_t gc_func;
   component_cleanup_t cleanup_func;
 } component_t;
+
+/***
+* Returns a new component in its default state
+*/
+component_t component_new();
 
 /***
 * Adds a component to the component registry.
@@ -44,3 +51,8 @@ bool component_exists(const char*);
 * Returns false if it wasn't able to grab the component.
 */
 bool component_get(const char*, component_t*);
+
+/***
+* Validates whether the component
+*/
+bool component_valid(component_t);

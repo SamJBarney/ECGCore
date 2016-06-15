@@ -10,12 +10,25 @@ std::vector<component_t> registered_components;
 
 
 
+component_t component_new()
+{
+  static component_t _default = {NULL,};
+  return _default;
+}
+
+
+
+
 bool component_register(const char* a_Name, component_t a_Component)
 {
-  if (!component_exists(a_Name))
+  if (!component_exists(a_Name) && component_valid(a_Component))
   {
     component_names.push_back(a_Name);
     registered_components.push_back(a_Component);
+    if (a_Component.init_func != NULL)
+    {
+      a_Component.init_func();
+    }
     return true;
   }
   return false;
@@ -71,4 +84,12 @@ bool component_get(const char* a_Name, component_t* a_Component)
     }
   }
   return false;
+}
+
+
+
+
+bool component_valid(component_t a_Component)
+{
+  return a_Component.gc_func != NULL && a_Component.cleanup_func != NULL;
 }
