@@ -1,4 +1,6 @@
 #include "entity.h"
+#include "config.h"
+
 #include <mutex>
 #include <vector>
 
@@ -13,10 +15,18 @@ static std::mutex ne_lock;
 static std::mutex ce_lock;
 static std::mutex ue_lock;
 
-void entity_init(uint32_t a_Mask)
+void entity_init()
 {
-  TYPE_MASK = a_Mask;
+  TYPE_MASK = config_current().entityTypeMask;
   ENTITY_MASK = UINT32_MAX ^ TYPE_MASK;
+}
+
+
+
+
+void entity_reload()
+{
+  
 }
 
 

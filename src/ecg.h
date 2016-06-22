@@ -1,42 +1,19 @@
 #pragma once
 
-#ifdef __cplusplus
-  #include <cstdint>
-  #define API_VISIBLE extern "C"
-#else
-  #include <stdint.h>
-  #include <stdbool.h>
-  #define API_VISIBLE
-#endif
+#include "global.h"
+#include "config.h"
+
+typedef bool(*continue_func_t)();
 
 /***
 * Creates the ticking threads
 */
-void ecg_init();
+void ecg_init(ecg_config_t*);
 
-/***
-* Preps the ticking threads for ticking
-*/
-void ecg_start();
+void ecg_reload();
 
-/***
-* Ticks the threads.
-* Returns false if the tick threads are busy
-*/
-bool ecg_tick();
+void ecg_run(continue_func_t);
 
-/***
-* Checks whether there is a current tick going on
-*/
-bool ecg_ticking();
+bool ecg_isRunning();
 
-/***
-* Stops the execution of the ticking threads
-*/
-void ecg_cleanup();
-
-
-/***
-* Returns the number of threads used for ticking
-*/
-uint32_t ecg_thread_count();
+uint32_t ecg_threadCount();

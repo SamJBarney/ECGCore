@@ -1,20 +1,9 @@
 #pragma once
 
-#ifdef __cplusplus
-  #include <cstdint>
-  #define API_VISIBLE extern "C"
-#else
-  #include <stdint.h>
-  #include <stdbool.h>
-  #define API_VISIBLE
-#endif
+#include "global.h"
+#include "config.h"
 
 typedef uint32_t entity_t;
-
-/***
-* Sets up the entity system
-*/
-void entity_init(uint32_t a_Mask);
 
 /***
 * Creates a new entity

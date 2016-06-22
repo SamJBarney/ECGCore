@@ -1,19 +1,20 @@
 #include "ecg.h"
+#include "entity.h"
+#include "internal/entity.h"
 #include "component.h"
+#include "config.h"
 
 #include <atomic>
 #include <thread>
 #include <utility>
 #include <vector>
-#include <iostream>
+#include <chrono>
 
-#ifndef MIN_TICK_THREAD_COUNT
-#define MIN_TICK_THREAD_COUNT 4
-#endif
+#define THREADS_COMPLETED UINT32_MAX
 
-#ifndef MIN_GC_THREAD_COUNT
-#define MIN_GC_THREAD_COUNT 2
-#endif
+void ecg_tick();
+bool ecg_ticking();
+void ecg_cleanup();
 
 void tick_thread_func(uint32_t id);
 void gc_thread_func();
@@ -27,7 +28,7 @@ std::atomic_bool running;
 std::mutex tick_mutex;
 std::mutex completed_mutex;
 std::condition_variable cv;
-static std::atomic<uint32_t> completed_threads_flag(UINT32_MAX);
+static std::atomic<uint32_t> completed_threads_flag(THREADS_COMPLETED);
 
 extern std::vector<component_t> registered_components;
 
@@ -38,9 +39,10 @@ void create_threads()
 {
   // Lookup the amount of threads we can use, minimum of MIN_TICK_THREAD_COUNT
   thread_count = std::thread::hardware_concurrency();
-  if (thread_count < MIN_TICK_THREAD_COUNT)
+  uint32_t min_count = config_current().minThreadCount;
+  if (thread_count < min_count)
   {
-    thread_count = MIN_TICK_THREAD_COUNT;
+    thread_count = min_count;
   }
 
   // Create the tick threads
@@ -55,11 +57,14 @@ void create_threads()
 
 void ecg_init()
 {
+  // Setup Entities
+  entity_init();
+
   // Create the tick threads
   create_threads();
 
   // Set the flag to the finished state
-  completed_threads_flag = UINT32_MAX;
+  completed_threads_flag = THREADS_COMPLETED;
 
   // Create the garbage collection thread
   gc_thread = std::thread(gc_thread_func);
@@ -68,15 +73,39 @@ void ecg_init()
 
 
 
-void ecg_start()
+void ecg_reload()
 {
-  running = true;
+  entity_reload();
 }
 
 
 
 
-bool ecg_tick()
+void ecg_run(continue_func_t a_Func)
+{
+  running = true;
+  auto sleep_time = config_current().sleepTime;
+  while (running)
+  {
+    std::chrono::time_point<std::chrono::system_clock> start, end;
+    start = std::chrono::system_clock::now();
+    ecg_tick();
+    while(ecg_ticking());
+    end = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (duration < sleep_time)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time - duration));
+    }
+    running = a_Func();
+  }
+  ecg_cleanup();
+}
+
+
+
+
+void ecg_tick()
 {
   if (!ecg_ticking())
   {
@@ -84,10 +113,8 @@ bool ecg_tick()
     completed_threads_flag.store(0, std::memory_order_seq_cst);
     completed_mutex.unlock();
     cv.notify_all();
-    return true;
   }
   // Handle either the gc not being done, or the ticking not being done
-  return false;
 }
 
 
@@ -97,7 +124,7 @@ bool ecg_ticking()
 {
   completed_mutex.lock();
   auto value = completed_threads_flag.load(std::memory_order_seq_cst);
-  bool ticking = value != UINT32_MAX;
+  bool ticking = value != THREADS_COMPLETED;
   completed_mutex.unlock();
   return ticking;
 }
@@ -110,7 +137,6 @@ void ecg_cleanup()
   // Wait for any tick threads to finish
   while(ecg_ticking());
   // Notify the threads that cleanup is happening
-  running = false;
   ecg_tick();
 
   // Join the threads
@@ -126,7 +152,7 @@ void ecg_cleanup()
 
 
 
-uint32_t ecg_thread_count()
+uint32_t ecg_threadCount()
 {
   return thread_count;
 }
@@ -134,7 +160,6 @@ uint32_t ecg_thread_count()
 
 
 
-#include <iostream>
 void tick_thread_func(uint32_t id)
 {
   // Hold until the engine is ready to run
@@ -204,7 +229,7 @@ void gc_thread_func()
 
     // Update the flag to COMPLETED
     completed_mutex.lock();
-    completed_threads_flag.store(UINT32_MAX, std::memory_order_seq_cst);
+    completed_threads_flag.store(THREADS_COMPLETED, std::memory_order_seq_cst);
     completed_mutex.unlock();
 
     // Notify waiting threads
